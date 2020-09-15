@@ -32,7 +32,10 @@
 #include <pthread.h>
 #include <syslog.h>
 #include <signal.h>
+#include <syscall.h>
 #include "alsaloop.h"
+
+#define NOSCHED
 
 struct loopback_thread {
 	int threaded;
@@ -140,16 +143,53 @@ static void set_loop_time(struct loopback *loop, unsigned long loop_time)
 	loop->loop_limit = loop->capt->rate * loop_time;
 }
 
+#ifdef NOSCHED
+static inline int nosched_setscheduler(int pid, int policy, const
+struct sched_param *p)
+{
+       return syscall(SYS_sched_setscheduler, pid, policy, p);
+}
+
+static inline int nosched_getscheduler(int pid)
+{
+       return syscall(SYS_sched_getscheduler, pid);
+}
+
+static inline int nosched_getparam(int pid, struct sched_param *p)
+{
+       return syscall(SYS_sched_getparam, pid, p);
+}
+
+static inline int nosched_get_priority_max(int policy)
+{
+       return syscall(SYS_sched_get_priority_max, policy);
+}
+
+static inline int nosched_get_priority_min(int policy)
+{
+       return syscall(SYS_sched_get_priority_min, policy);
+}
+#endif
+
 static void setscheduler(void)
 {
 	struct sched_param sched_param;
 
+#ifdef NOSCHED
+	if (nosched_getparam(0, &sched_param) < 0) {
+#else
 	if (sched_getparam(0, &sched_param) < 0) {
+#endif
 		logit(LOG_WARNING, "Scheduler getparam failed.\n");
 		return;
 	}
+#ifdef NOSCHED
+	sched_param.sched_priority = nosched_get_priority_max(SCHED_RR);
+	if (!nosched_setscheduler(0, SCHED_RR, &sched_param)) {
+#else
 	sched_param.sched_priority = sched_get_priority_max(SCHED_RR);
 	if (!sched_setscheduler(0, SCHED_RR, &sched_param)) {
+#endif
 		if (verbose)
 			logit(LOG_WARNING, "Scheduler set to Round Robin with priority %i\n", sched_param.sched_priority);
 		return;
