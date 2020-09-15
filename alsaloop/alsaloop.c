@@ -785,11 +785,15 @@ static void thread_job1(void *_data)
 		for (i = j = 0; i < thread->loopbacks_count; i++) {
 			err = pcmjob_pollfds_init(thread->loopbacks[i], &pfds[j]);
 			if (err < 0) {
-				logit(LOG_CRIT, "Poll FD initialization failed.\n");
-				my_exit(thread, EXIT_FAILURE);
+				snd_pcm_prepare(thread->loopbacks[i]->play->handle);
+				thread->loopbacks[i]->play->xrun_pending = 1;
+				break;
+
 			}
 			j += err;
 		}
+		if (err < 0)
+			continue;
 		if (verbose > 10)
 			gettimeofday(&tv1, NULL);
 		err = poll(pfds, j, wake);
