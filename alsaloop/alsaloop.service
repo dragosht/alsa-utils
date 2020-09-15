@@ -1,0 +1,10 @@
+[Unit]
+Description=ALSA Loopback utility service
+After=sound.target
+
+[Service]
+Type=simple
+ExecStart=alsaloop -C hw:0,27 -P dmixRDMA0 -f S32_LE -r 48000 -c 8 --period=288 -t 6000 -S none -v
+
+[Install]
+WantedBy=multi-user.target
