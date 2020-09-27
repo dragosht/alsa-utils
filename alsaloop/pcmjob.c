@@ -722,6 +722,12 @@ static int readit(struct loopback_handle *lhandle)
 			fwrite(lhandle->buf + lhandle->buf_pos * lhandle->frame_size,
 			       r, lhandle->frame_size, lhandle->loopback->cfile);
 #endif
+
+		if (verbose > 6)
+			snd_output_printf(lhandle->loopback->output, "readit: buf_pos: %lu->%lu, buf_count=%lu->%lu, r=%lu\n",
+				lhandle->buf_pos, (lhandle->buf_pos + r) % lhandle->buf_size,
+				lhandle->buf_count, (lhandle->buf_count + r), r);
+
 		res += r;
 		if (lhandle->max < res)
 			lhandle->max = res;
@@ -775,6 +781,12 @@ static int writeit(struct loopback_handle *lhandle)
 			fwrite(lhandle->buf + lhandle->buf_pos * lhandle->frame_size,
 			       r, lhandle->frame_size, lhandle->loopback->pfile);
 #endif
+
+		if (verbose > 6)
+			snd_output_printf(lhandle->loopback->output, "writeit: buf_pos: %lu->%lu, buf_count=%lu->%lu, r=%lu\n",
+				lhandle->buf_pos, (lhandle->buf_pos + r) % lhandle->buf_size,
+				lhandle->buf_count, (lhandle->buf_count - r), r);
+
 		res += r;
 		lhandle->counter += r;
 		lhandle->buf_count -= r;
