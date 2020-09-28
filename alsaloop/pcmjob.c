@@ -840,8 +840,8 @@ static int xrun_sync(struct loopback *loop)
 {
 	struct loopback_handle *play = loop->play;
 	struct loopback_handle *capt = loop->capt;
-	snd_pcm_uframes_t fill = get_whole_latency(loop);
-	snd_pcm_sframes_t pdelay, cdelay, delay1, pdelay1, cdelay1, diff;
+	snd_pcm_uframes_t pos, fill = get_whole_latency(loop);
+	snd_pcm_sframes_t pdelay, cdelay, delay1, pdelay1, cdelay1, diff, diff1;
 	int err;
 
       __again:
@@ -976,16 +976,28 @@ static int xrun_sync(struct loopback *loop)
 				"sync: xrun_pending, silence filling %li / buf_count=%li\n", (long)diff, play->buf_count);
 		if (fill > delay1 && play->buf_count < diff) {
 			diff = diff - play->buf_count;
-			if (verbose > 6)
-				snd_output_printf(loop->output,
-					"sync: playback silence added %li samples\n", (long)diff);
-			play->buf_pos -= diff;
-			play->buf_pos %= play->buf_size;
-			err =  snd_pcm_format_set_silence(play->format, play->buf + play->buf_pos * play->frame_size,
-							  diff * play->channels);
-			if (err < 0)
-				return err;
-			play->buf_count += diff;
+			play->buf_pos = (play->buf_pos + play->buf_size - diff) % play->buf_size;
+			pos = play->buf_pos;
+
+			diff1 = diff;
+
+			while (diff1 > 0) {
+				delay1 = play->buf_size - pos;
+				if (delay1 > diff1)
+					delay1 = diff1;
+				if (verbose > 6)
+					snd_output_printf(loop->output,
+							  "sync: playback silence added %li samples at pos: %lu\n",
+							  (long)delay1, pos);
+
+				err = snd_pcm_format_set_silence(play->format, play->buf + pos * play->frame_size,
+								 delay1 * play->channels);
+				if (err < 0)
+					return err;
+				pos = (pos + delay1) % play->buf_size;
+				play->buf_count += delay1;
+				diff1 -= delay1;
+			}
 		}
 		if ((err = snd_pcm_prepare(play->handle)) < 0) {
 			logit(LOG_CRIT, "%s prepare failed: %s\n", play->id, snd_strerror(err));
@@ -1018,8 +1030,7 @@ static int xrun_sync(struct loopback *loop)
 							 delay1 * play->channels);
 			if (err < 0)
 				return err;
-			play->buf_pos += delay1;
-			play->buf_pos %= play->buf_size;
+			play->buf_pos = (play->buf_pos + play->buf_size - delay1) % play->buf_size;
 			play->buf_count += delay1;
 			diff -= delay1;
 		}
