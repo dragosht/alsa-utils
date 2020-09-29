@@ -925,80 +925,38 @@ static int xrun_sync(struct loopback *loop)
 			"sync: cbufcount=%li, pbufcount=%li\n",
 			(long)capt->buf_count, (long)play->buf_count);
 	}
-	if (delay1 > fill && capt->counter > 0) {
-		if ((err = snd_pcm_drop(capt->handle)) < 0)
-			return err;
-		if ((err = snd_pcm_prepare(capt->handle)) < 0)
-			return err;
-		if ((err = snd_pcm_start(capt->handle)) < 0)
-			return err;
-		diff = remove_samples(loop, 1, (delay1 - fill) / capt->pitch);
-		if (verbose > 6)
-			snd_output_printf(loop->output,
-				"sync: capt stop removed %li samples\n", (long)diff);
-		goto __again;
-	}
-	if (delay1 > fill) {
-		diff = (delay1 - fill) / play->pitch;
-		if (diff > play->buf_count)
-			diff = play->buf_count;
-		if (verbose > 6)
-			snd_output_printf(loop->output,
-				"sync: removing %li playback samples, delay1=%li\n", (long)diff, (long)delay1);
-		diff = remove_samples(loop, 0, diff);
-		pdelay -= diff;
-		pdelay1 = pdelay * play->pitch;
-		delay1 = cdelay1 + pdelay1;
-		if (verbose > 6)
-			snd_output_printf(loop->output,
-				"sync: removed %li playback samples, delay1=%li\n", (long)diff, (long)delay1);
-	}
-	if (delay1 > fill) {
-		diff = (delay1 - fill) / capt->pitch;
-		if (diff > capt->buf_count)
-			diff = capt->buf_count;
-		if (verbose > 6)
-			snd_output_printf(loop->output,
-				"sync: removing %li captured samples, delay1=%li\n", (long)diff, (long)delay1);
-		diff -= remove_samples(loop, 1, diff);
-		cdelay -= diff;
-		cdelay1 = cdelay * capt->pitch;
-		delay1 = cdelay1 + pdelay1;		
-		if (verbose > 6)
-			snd_output_printf(loop->output,
-				"sync: removed %li captured samples, delay1=%li\n", (long)diff, (long)delay1);
-	}
+
 	if (play->xrun_pending) {
 		play->xrun_pending = 0;
-		diff = (fill - delay1) / play->pitch;
+		diff = fill;
+
 		if (verbose > 6)
 			snd_output_printf(loop->output,
 				"sync: xrun_pending, silence filling %li / buf_count=%li\n", (long)diff, play->buf_count);
-		if (fill > delay1 && play->buf_count < diff) {
-			diff = diff - play->buf_count;
-			play->buf_pos = (play->buf_pos + play->buf_size - diff) % play->buf_size;
-			pos = play->buf_pos;
+		play->buf_pos = (play->buf_pos + play->buf_size - diff) % play->buf_size;
+		pos = play->buf_pos;
 
-			diff1 = diff;
+		diff1 = diff;
+		while (diff1 > 0) {
+			delay1 = play->buf_size - pos;
+			if (delay1 > diff1)
+				delay1 = diff1;
+			if (verbose > 6)
+				snd_output_printf(loop->output,
+							"sync: playback silence added %li samples at pos: %lu\n",
+							(long)delay1, pos);
 
-			while (diff1 > 0) {
-				delay1 = play->buf_size - pos;
-				if (delay1 > diff1)
-					delay1 = diff1;
-				if (verbose > 6)
-					snd_output_printf(loop->output,
-							  "sync: playback silence added %li samples at pos: %lu\n",
-							  (long)delay1, pos);
-
-				err = snd_pcm_format_set_silence(play->format, play->buf + pos * play->frame_size,
-								 delay1 * play->channels);
-				if (err < 0)
-					return err;
-				pos = (pos + delay1) % play->buf_size;
-				play->buf_count += delay1;
-				diff1 -= delay1;
-			}
+			err = snd_pcm_format_set_silence(play->format, play->buf + pos * play->frame_size,
+								delay1 * play->channels);
+			if (err < 0)
+				return err;
+			pos = (pos + delay1) % play->buf_size;
+			play->buf_count += delay1;
+			diff1 -= delay1;
 		}
+
+		capt->buf_count = 0;
+
 		if ((err = snd_pcm_prepare(play->handle)) < 0) {
 			logit(LOG_CRIT, "%s prepare failed: %s\n", play->id, snd_strerror(err));
 			return err;
@@ -1007,34 +965,10 @@ static int xrun_sync(struct loopback *loop)
 		if (verbose > 6)
 			snd_output_printf(loop->output,
 				"sync: playback wrote %li samples\n", (long)delay1);
-		if (delay1 > diff) {
-			buf_remove(loop, delay1 - diff);
-			if (verbose > 6)
-				snd_output_printf(loop->output,
-					"sync: playback buf_remove %li samples\n", (long)(delay1 - diff));
-		}
 		if ((err = snd_pcm_start(play->handle)) < 0) {
 			logit(LOG_CRIT, "%s start failed: %s\n", play->id, snd_strerror(err));
 			return err;
 		}
-	} else if (delay1 < fill) {
-		diff = (fill - delay1) / play->pitch;
-		while (diff > 0) {
-			delay1 = play->buf_size - play->buf_pos;
-			if (verbose > 6)
-				snd_output_printf(loop->output,
-					"sync: playback short, silence filling %li / buf_count=%li\n", (long)delay1, play->buf_count);
-			if (delay1 > diff)
-				delay1 = diff;
-			err = snd_pcm_format_set_silence(play->format, play->buf + play->buf_pos * play->frame_size,
-							 delay1 * play->channels);
-			if (err < 0)
-				return err;
-			play->buf_pos = (play->buf_pos + play->buf_size - delay1) % play->buf_size;
-			play->buf_count += delay1;
-			diff -= delay1;
-		}
-		writeit(play);
 	}
 	if (verbose > 5) {
 		snd_output_printf(loop->output, "%s: xrun sync ok\n", loop->id);
